@@ -98,9 +98,16 @@ cc
 ;;                  ((fn [f] (fn [x] x)) f)
 ;;                  x)))
 
-;; (fn [f] (fn [x] (f (fn [x] x) x)))
+;; (fn [f] (fn [x]
+;;           (f (fn [x] x) x)))
 
-(def one (fn [f] (fn [x] (f (fn [x] x) x))))
+;; (fn [f] (fn [x] (f x)))
 
 
+(def one (fn [f] (fn [x] (f x))))
+(def two (fn [f] (fn [x] (f (f x)))))
 
+(defn church->int [c]
+  ((c inc) 0))
+
+(church->int two)
