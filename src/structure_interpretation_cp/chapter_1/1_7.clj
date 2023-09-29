@@ -31,7 +31,7 @@
                     (println "Guess: " guess)
                     (if (good-enough? guess)
                       guess
-                      (sqrt-iter (improve guess) x)))]
+                      (recur (improve guess))))]
     (sqrt-iter 1.0)))
 
 (sqrt-i 2)
