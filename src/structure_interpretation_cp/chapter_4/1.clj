@@ -475,3 +475,16 @@ lov
 ;;     (evaluate (definition-value exp) env)
 ;;     env)
 ;;   :ok)
+
+
+;; (defn print-env 
+;;   ([env] (print-env an-atom []))
+;;   ([env atoms-visited]
+;;    (if (empty? env)
+;;      :done
+;;      (do
+;;        (print-frame (first env) atoms-visited)
+;;        (print-env (rest env))))
+;;    )
+;;   )
+
