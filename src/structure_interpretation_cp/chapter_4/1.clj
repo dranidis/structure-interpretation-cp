@@ -367,8 +367,6 @@ lov
       (is (= (evaluate :x env) 10))
       (is (= (evaluate :y env) 11)))))
 
-
-
 (def primitives
   {:car (list :primitive first)
    :cdr (list :primitive #(if (empty? (rest %)) nil (first (rest %))))
@@ -402,9 +400,10 @@ lov
   (println str))
 (defn announce-output [str]
   (println str))
+
 (defn user-print [object]
   (if (compound-procedure? object)
-    (println (list 'compound-procedure
+    (println (list :compound-procedure
                    (procedure-parameters object)
                    (procedure-body object)
                    '<procedure-env>))
@@ -413,8 +412,29 @@ lov
 (def input-prompt ";;; M-Eval input:")
 (def output-prompt ";;; M-Eval value:")
 
+
+
+(declare print-env)
+
+(defn print-frame-keyval [[key val]]
+  (print key " --> ")
+  (user-print val))
+
+(defn print-frame [frame]
+  (println "env")
+  (doseq [keyval @frame] (print-frame-keyval keyval)))
+
+(defn print-env
+  ([env]
+   (if (empty? env)
+     :done
+     (do
+       (print-frame (first env))
+       (print-env (rest env))))))
+
+
 (defn driver-loop []
-  ;; (pprint/pprint the-global-environment)
+  (print-env the-global-environment)
   (prompt-for-input input-prompt)
   (letfn [(input [] (let [line (read-line)]
                       (if (= line "")
@@ -470,21 +490,11 @@ lov
   (evaluate an-exp the-global-environment)
 
   1)
-;; (defn eval-definition [exp env]
-;;   (define-variable! (definition-variable exp)
-;;     (evaluate (definition-value exp) env)
-;;     env)
-;;   :ok)
 
 
-;; (defn print-env 
-;;   ([env] (print-env an-atom []))
-;;   ([env atoms-visited]
-;;    (if (empty? env)
-;;      :done
-;;      (do
-;;        (print-frame (first env) atoms-visited)
-;;        (print-env (rest env))))
-;;    )
-;;   )
+
+(print-env the-global-environment)
+
+(pprint/pprint the-global-environment)
+
 
