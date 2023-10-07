@@ -31,11 +31,11 @@
 (macroexpand '(cons-stream 1 the-empty-stream))
 
 
-(defn stream-map [proc s]
-  (if (stream-null? s)
+(defn stream-map [proc & streams]
+  (if (stream-null? (first streams))
     the-empty-stream
-    (cons-stream (proc (stream-car s))
-                 (stream-map proc (stream-cdr s)))))
+    (cons-stream (apply proc (map stream-car streams))
+                 (apply stream-map (cons proc (map stream-cdr streams))))))
 
 (def example-stream (cons-stream 1 (cons-stream 2 the-empty-stream)))
 (def mapped (stream-map inc example-stream))
@@ -132,9 +132,35 @@ primes
 ;; => 10141
 
 ;; results in stack overflow
-(nth primes 1245)
+;; (nth primes 1245)
+
+;; Define streams
+
+(declare ones)
+(def ones (cons-stream 1 ones))
+ones
+
+(defn add-streams [s1 s2] (stream-map + s1 s2))
+
+(def twos (add-streams ones ones))
+twos
+
+(nth twos 10)
+
+(declare integers)
+(def integers (cons-stream 1 (add-streams ones integers)))
+
+(declare fibs)
+(def fibs
+  (cons-stream
+   0
+   (cons-stream 1 (add-streams (stream-cdr fibs) fibs))))
 
 
+(def s (cons-stream 1 (add-streams s s)))
+s
+
+fibs
 
 
 
