@@ -13,15 +13,15 @@
 (defn add-binding-to-frame! [var val frame]
   (reset! frame (assoc @frame var val)))
 
-(comment
-  (def a-frame (make-frame {'x 1}))
-  (get-value-from-frame a-frame 'x)
-  (add-binding-to-frame! 'y 2 a-frame)
-  (get-value-from-frame a-frame 'y)
-  (add-binding-to-frame! 'x 44 a-frame)
-  (get-value-from-frame a-frame 'x)
-  ;
-  )
+(deftest frame-test
+  (testing ""
+    (let [a-frame (make-frame {:x 1})]
+      (is (= 1 (get-value-from-frame a-frame :x)))
+      (add-binding-to-frame! :y 2 a-frame)
+      (is (= 2 (get-value-from-frame a-frame :y)))
+      (add-binding-to-frame! :x 44 a-frame)
+      (is (= 44 (get-value-from-frame a-frame :x))))))
+
 
 ;; an environment is a list of frames
 (def the-empty-environment '())
@@ -31,7 +31,6 @@
 (defn extend-environment [mapping-of-variables-to-values base-env]
   (cons (make-frame mapping-of-variables-to-values) base-env))
 
-
 (defn lookup-variable-value [var env]
   (letfn [(env-loop [env]
             (letfn [(scan  [frame]
@@ -40,7 +39,7 @@
                           (env-loop (enclosing-environment env))
                           val)))]
               (if (= env the-empty-environment)
-                (throw (Exception. (str "Unbound variable: " var)))
+                (throw (RuntimeException. (str "Unbound variable: " var)))
                 (scan (first-frame env)))))]
     (env-loop env)))
 
@@ -142,9 +141,7 @@
     (is (= false (if-alternative (list :if :pred :then))))
     (is (= :alt (if-alternative (list :if :pred :then :alt))))))
 
-
 (defn and? [exp] (tagged-list? exp :and))
-(defn and-conds [exp] (rest exp))
 
 (defn make-procedure [parameters body env]
   (list :procedure parameters body env))
@@ -182,7 +179,7 @@
                 (scan (first-frame env)))))]
     (env-loop env)))
 
-(defn mydefine-variable! [var val env]
+(defn define-variable! [var val env]
   (add-binding-to-frame! var val (first-frame env)))
 
 ;; eval-sequence is used by apply to evaluate the sequence of expressions
@@ -227,9 +224,9 @@
   :ok)
 
 (defn eval-definition [exp env]
-  (mydefine-variable! (definition-variable exp)
-                      (evaluate (definition-value exp) env)
-                      env)
+  (define-variable! (definition-variable exp)
+    (evaluate (definition-value exp) env)
+    env)
   :ok)
 
 (defn create-mapping
@@ -326,8 +323,6 @@ lov
                                 (list-of-values (operands exp) env))
     :else (throw (Exception. (str "Unknown expression type: " exp env)))))
 
-
-
 ;; test for evaluate
 (deftest evaluate-test
   (testing "evaluate self-evaluating"
@@ -356,14 +351,14 @@ lov
     (let [env (->> the-empty-environment
                    (extend-environment {:y 2})
                    (extend-environment {:x 10}))
-          _ (mydefine-variable! :x 11 env)]
+          _ (define-variable! :x 11 env)]
       (is (= (evaluate :x env) 11))
       (is (= (evaluate :y env) 2))))
   (testing "defining a variable adds it to the first frame if it does not exist"
     (let [env (->> the-empty-environment
                    (extend-environment {:y 2})
                    (extend-environment {:x 10}))
-          _ (mydefine-variable! :y 11 env)]
+          _ (define-variable! :y 11 env)]
       (is (= (evaluate :x env) 10))
       (is (= (evaluate :y env) 11)))))
 
@@ -376,25 +371,26 @@ lov
    :- (list :primitive -)
    :* (list :primitive *)
    :/ (list :primitive /)
-   :eq? (list :primitive =)})
+   :eq? (list :primitive =)
+   :not (list :primitive not)
+   :list (list :primitive list)})
 
 (defn setup-environment []
   (let [initial-env (extend-environment primitives the-empty-environment)]
-    (mydefine-variable! :true true initial-env)
-    (mydefine-variable! :false false initial-env)
+    (define-variable! :true true initial-env)
+    (define-variable! :false false initial-env)
     initial-env))
 
-(def the-global-environment (setup-environment))
+(deftest setup-evaluate
+  (testing "self"
+    (is (= 1 (evaluate 1 (setup-environment)))))
+  (testing "define variable"
+    (let [env (setup-environment)]
+      (evaluate (list :define :x 2) env)
+      (is (= 2 (evaluate :x env))))))
 
-(comment
-  (def a-proc (list 'procedure "par" "body" "env"))
-  (first (rest a-proc))
-  (compound-procedure? a-proc)
-  (procedure-parameters a-proc)
-  (procedure-body a-proc)
-  (procedure-env a-proc)
-  ;
-  )
+
+(def the-global-environment (setup-environment))
 
 (defn prompt-for-input [str]
   (println str))
@@ -411,8 +407,6 @@ lov
 
 (def input-prompt ";;; M-Eval input:")
 (def output-prompt ";;; M-Eval value:")
-
-
 
 (declare print-env)
 
@@ -432,6 +426,11 @@ lov
        (print-frame (first env))
        (print-env (rest env))))))
 
+(defn read-lines-till-empty []
+  (let [line (read-line)]
+    (if (= line "")
+      ""
+      (str line (read-lines-till-empty)))))
 
 (defn driver-loop []
   (print-env the-global-environment)
@@ -447,10 +446,11 @@ lov
 
 ;; (driver-loop)
 
+
+
+
 (run-tests)
 
-(defn -main [& args]
-  (driver-loop))
 
 (comment
   (and)
@@ -469,9 +469,9 @@ lov
   (definition-value an-exp)
 
 
-  (mydefine-variable! (definition-variable an-exp)
-                      (evaluate (definition-value an-exp) the-global-environment)
-                      the-global-environment)
+  (define-variable! (definition-variable an-exp)
+    (evaluate (definition-value an-exp) the-global-environment)
+    the-global-environment)
 
   (add-binding-to-frame! :sq (evaluate (definition-value an-exp) the-global-environment) (first-frame the-global-environment))
 
@@ -493,8 +493,8 @@ lov
 
 
 
-(print-env the-global-environment)
+;; (print-env the-global-environment)
 
-(pprint/pprint the-global-environment)
+;; (pprint/pprint the-global-environment)
 
 
