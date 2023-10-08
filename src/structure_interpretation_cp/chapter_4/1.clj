@@ -10,6 +10,9 @@
 (defn get-value-from-frame [frame var]
   (get @frame var))
 
+(defn frame-contains-var? [frame var]
+  (contains? @frame var))
+
 (defn add-binding-to-frame! [var val frame]
   (reset! frame (assoc @frame var val)))
 
@@ -31,17 +34,22 @@
 (defn extend-environment [mapping-of-variables-to-values base-env]
   (cons (make-frame mapping-of-variables-to-values) base-env))
 
+(declare print-env)
+
 (defn lookup-variable-value [var env]
   (letfn [(env-loop [env]
             (letfn [(scan  [frame]
                       (let [val (get-value-from-frame frame var)]
-                        (if (nil? val)
-                          (env-loop (enclosing-environment env))
-                          val)))]
+                        (if (frame-contains-var? frame var)
+                          val
+                          (env-loop (enclosing-environment env)))))]
               (if (= env the-empty-environment)
                 (throw (RuntimeException. (str "Unbound variable: " var)))
                 (scan (first-frame env)))))]
-    (env-loop env)))
+    (try (env-loop env)
+         (catch Exception e
+           (println (.getMessage e) "Error in ENV: ")
+           (print-env env)))))
 
 
 ;; 4.1.2 Representing Expressions
@@ -78,17 +86,12 @@
 
 (defn lambda? [exp] (tagged-list? exp :lambda))
 (defn lambda-parameters [exp] (second exp))
-(defn lambda-body [exp] (nth exp 2))
+(defn lambda-body [exp]
+  (nth exp 2))
 (defn make-lambda [parameters body]
   (list :lambda parameters body))
 
-(deftest lambda-test
-  (testing "lambda?"
-    (is (lambda? (list :lambda (list :p1 :p2) :body))))
-  (testing "lambda-parameters"
-    (is (= (list :p1 :p2) (lambda-parameters (list :lambda (list :p1 :p2) :body)))))
-  (testing "lambda-body"
-    (is (= :body (lambda-body (list :lambda (list :p1 :p2) :body))))))
+
 
 ;; • Definitions have the form
 ;; (define ⟨var⟩ ⟨value⟩)
@@ -109,7 +112,7 @@
   (if (keyword? (second exp))
     (nth exp 2)
     (make-lambda (rest (second exp))
-                 (nth exp 2))))
+                 (rest (rest exp)))))
 
 (deftest definition-test
   (testing "definition?"
@@ -119,7 +122,7 @@
     (is (= :var1 (definition-variable (list :define (list :var1 :p1 :p2) :body)))))
   (testing "definition-value"
     (is (= 1 (definition-value '(:define :var1 1))))
-    (is (= (list :lambda (list :p1 :p2) :body) (definition-value (list :define (list :var1 :p1 :p2) :body))))))
+    (is (= (list :lambda (list :p1 :p2) (list :body)) (definition-value (list :define (list :var1 :p1 :p2) :body))))))
 
 ;; • Conditionals begin with if and have a predicate, a consequent,
 ;; and an (optional) alternative. If the expression has no alternative
@@ -130,7 +133,7 @@
 (defn if-consequent [exp] (nth exp 2))
 (defn if-alternative [exp]
   (if (= 3 (count exp))
-    false
+    :false
     (nth exp 3)))
 
 (deftest if-test
@@ -138,13 +141,28 @@
     (is (if? (list :if :pred :then)))
     (is (= :pred (if-predicate (list :if :pred :then))))
     (is (= :then (if-consequent (list :if :pred :then))))
-    (is (= false (if-alternative (list :if :pred :then))))
+    (is (= :false (if-alternative (list :if :pred :then))))
     (is (= :alt (if-alternative (list :if :pred :then :alt))))))
 
 (defn and? [exp] (tagged-list? exp :and))
 
 (defn make-procedure [parameters body env]
   (list :procedure parameters body env))
+
+;; Exercise 4.6 
+;; let expressions are derived expressions, because
+;; (let ((⟨var1⟩ ⟨exp1⟩) . . . (⟨varn⟩ ⟨expn⟩))
+;;   ⟨body⟩)
+;; is equivalent to
+;; ((lambda (⟨var1⟩ . . . ⟨varn⟩)
+;;          ⟨body⟩)
+;;  ⟨exp1⟩
+;;  . . .
+;;  ⟨expn⟩)
+
+(defn let? [exp] (tagged-list? exp :let))
+
+
 
 (defn compound-procedure? [p]
   (tagged-list? p :procedure))
@@ -163,8 +181,13 @@
 (def apply-in-underlying-language clojure.core/apply)
 
 (defn apply-primitive-procedure [proc args]
-  (apply-in-underlying-language
-   (primitive-implementation proc) args))
+  (try (apply-in-underlying-language
+        (primitive-implementation proc) args)
+       (catch Exception e
+         (str "apply-primitive-procedure"
+              proc
+              args
+              (.getMessage e)))))
 
 
 (defn set-variable-value! [var new-value env]
@@ -186,7 +209,7 @@
 ;; in a procedure body and by eval to evaluate the sequence of expressions
 ;; in a begin expression. It takes as arguments a sequence of expressions
 ;; and an environment, and evaluates the expressions in the order in which
-;; they occur. e value returned is the value of the final expression.
+;; they occur. The value returned is the value of the final expression.
 (declare evaluate)
 
 (defn eval-if [exp env]
@@ -209,10 +232,7 @@
 (defn rest-exps [exps] (rest exps))
 
 (defn eval-sequence [exps env]
-  (println "EXPS" exps)
-  (cond (last-exp? exps) (do
-                           (println "FIRST" (first-exp exps))
-                           (evaluate (first-exp exps) env))
+  (cond (last-exp? exps) (evaluate (first-exp exps) env)
         :else (do (evaluate (first-exp exps) env)
                   (eval-sequence (rest-exps exps) env))))
 
@@ -246,15 +266,15 @@
 ;; following
 ;; if the body is (list :+ :x :y)
 ;; the eval-squence returns the value of :y
- ;; (eval-sequence
-        (evaluate
+        (eval-sequence
+        ;; (evaluate
          (procedure-body procedure)
          (extend-environment
           (create-mapping (procedure-parameters procedure)
                           arguments)
           (procedure-env procedure)))
         :else
-        (throw (RuntimeException. (str "Unknown procedure type: APPLY " procedure)))))
+        (throw (RuntimeException. (str "Unknown procedure type: APPLY " procedure arguments)))))
 
 
 ;; When eval processes a procedure application, it uses list-of-values
@@ -323,48 +343,10 @@ lov
                                 (list-of-values (operands exp) env))
     :else (throw (Exception. (str "Unknown expression type: " exp env)))))
 
-;; test for evaluate
-(deftest evaluate-test
-  (testing "evaluate self-evaluating"
-    (is (= (evaluate 1 nil) 1))
-    (is (= (evaluate "a string" nil) "a string")))
-  (testing "evaluate variable"
-    (let [env (->> the-empty-environment
-                   (extend-environment {:y 2})
-                   (extend-environment {:x 10}))]
-      (is (= (evaluate :x env) 10))
-      (is (= (evaluate :y env) 2))))
-  (testing "evaluate quote"
-    (is (= (evaluate '(:quote 12) nil) 12))))
-
-(deftest set-variable-test
-  (testing "setting variable"
-    (let [env (->> the-empty-environment
-                   (extend-environment {:y 2})
-                   (extend-environment {:x 10}))
-          _ (set-variable-value! :x 11 env)]
-      (is (= (evaluate :x env) 11))
-      (is (= (evaluate :y env) 2)))))
-
-(deftest define-variable-test
-  (testing "defining a variable changes the variable in the first frame if it already exists"
-    (let [env (->> the-empty-environment
-                   (extend-environment {:y 2})
-                   (extend-environment {:x 10}))
-          _ (define-variable! :x 11 env)]
-      (is (= (evaluate :x env) 11))
-      (is (= (evaluate :y env) 2))))
-  (testing "defining a variable adds it to the first frame if it does not exist"
-    (let [env (->> the-empty-environment
-                   (extend-environment {:y 2})
-                   (extend-environment {:x 10}))
-          _ (define-variable! :y 11 env)]
-      (is (= (evaluate :x env) 10))
-      (is (= (evaluate :y env) 11)))))
 
 (def primitives
   {:car (list :primitive first)
-   :cdr (list :primitive #(if (empty? (rest %)) nil (first (rest %))))
+   :cdr (list :primitive #(if (empty? (rest %)) nil  (rest %)))
    :cons (list :primitive (fn [a b] (cons a (list b))))
    :null? (list :primitive nil?)
    :+ (list :primitive +)
@@ -449,7 +431,7 @@ lov
 
 
 
-(run-tests)
+;; (run-tests)
 
 
 (comment

@@ -1,5 +1,6 @@
 (ns structure-interpretation-cp.chapter-4.3
-  (:require [structure-interpretation-cp.chapter-4.1
+  (:require [clojure.string :as str]
+            [structure-interpretation-cp.chapter-4.1
              :refer [application? apply-primitive-procedure assignment-value
                      assignment-variable assignment? compound-procedure?
                      create-mapping define-variable! definition-value definition-variable definition?
@@ -12,19 +13,7 @@
 
 ;; 4.3 Variations on a Scheme — Nondeterministic Computing
 
-(declare amb)
 (declare analyze)
-
-(defn require-amb [p] (when (not p) (amb)))
-
-(defn an-element-of [items]
-  (require-amb (not (empty items)))
-  (amb (first items) (an-element-of (rest items))))
-
-(defn an-integer-starting-from [n]
-  (amb n (an-integer-starting-from (inc n))))
-
-
 
 ;; Structure of the evaluator
 
@@ -44,10 +33,12 @@
 (defn- analyze-variable [exp]
   (fn [env succeed fail] (succeed (lookup-variable-value exp env) fail)))
 
+(declare analyze-sequence)
+
 (defn- analyze-lambda [exp]
   (let [vars (lambda-parameters exp)
         ;; differs from book which uses analyze-sequence
-        bproc (analyze (lambda-body exp))]
+        bproc (analyze-sequence (lambda-body exp))]
     (fn [env succeed fail] (succeed (make-procedure vars bproc env) fail))))
 
 ;; Conditionals and sequences
@@ -68,6 +59,29 @@
                  (cproc env succeed fail2)
                  (aproc env succeed fail2)))
              fail))))
+
+;; Sequences are also handled in the same way as in the previous evaluator,
+;; except for the machinations in the subprocedure sequentially that are
+;; required for passing the continuations. Namely, to sequentially execute
+;; a and then b, we call a with a success continuation that calls b.
+(defn analyze-sequence [exps]
+  (letfn [(sequentially [a b]
+            (fn [env succeed fail]
+              (a env
+                             ;; success continuation for calling a
+                 (fn [a-value fail2]
+                   (b env succeed fail2))
+                 fail)))
+          (loop [first-proc rest-procs]
+            (if (empty? rest-procs)
+              first-proc
+              (loop (sequentially first-proc
+                                  (first rest-procs))
+                (rest rest-procs))))]
+    (let [procs (map analyze exps)]
+      (if (empty? procs)
+        (throw (RuntimeException. (str "Empty sequence: ANALYZE")))
+        (loop (first procs) (rest procs))))))
 
 ;; Definitions and assignments
 
@@ -91,7 +105,7 @@
 ;; Assignments are more interesting. This is the first place where we really
 ;; use the continuations, rather than just passing them around. 
 ;; The execution procedure for assignments starts out like the one for definitions.
-;; It first aempts to obtain the new value to be assigned to the variable.
+;; It first attempts to obtain the new value to be assigned to the variable.
 ;; If this evaluation of vproc fails, the assignment fails.
 ;; If vproc succeeds, however, and we go on to make the assignment,
 ;; we must consider the possibility that this branch of the computation
@@ -234,64 +248,136 @@
 (def input-prompt ";;; Amb-Eval input:")
 (def output-prompt ";;; Amb-Eval value:")
 
-(defn driver-loop []
-  (letfn [(internal-loop [try-again]
-            (let [input (parse/parse (read-lines-till-empty))]
-              (println input)
-              (if (= input :try-again)
-                (try-again)
-                (do
-                  (println ";;;; Starting a new problem")
-                  (ambeval
-                   input
-                   the-global-environment
-                                ;; ambeval success
-                   (fn [val next-alternative]
-                     (println output-prompt)
-                     (user-print val)
-                     (internal-loop next-alternative))
-                                ;; ambeval failure
-                   (fn []
-                     (println ";;; There are no more values of")
-                     (user-print input)
-                     (driver-loop)))))))]
-    (internal-loop
-     (fn []
-       (println ";;;; There is no current problem")
+(defn read-from-string [a-string]
+  (let [lines (atom (str/split a-string #"\n\n"))]
+    (println @lines)
+    (fn []
+      (if (or (empty? @lines) (= "" (first @lines)))
+        (read-lines-till-empty)
+        (let [first-line (first @lines)]
+          (swap! lines rest)
+          (str/trim (str/replace first-line "\n" " ")))))))
+
+(defn driver-loop-string
+  "main REPL for AMB.
+   May accept an initial string for the AMB program"
+  ([] (driver-loop-string ""))
+  ([program]
+   (let [read-next! (read-from-string program)]
+     (letfn [(driver-loop []
+               (letfn [(internal-loop [try-again]
+                         (let [next-string (read-next!)
+                               _ (println "> " next-string)
+                               input (parse/parse next-string)]
+                           (println input)
+                           (if (= input :try-again)
+                             (try-again)
+                             (do
+                               (println ";;;; Starting a new problem")
+                               (ambeval
+                                input
+                                the-global-environment
+                                           ;; ambeval success
+                                (fn [val next-alternative]
+                                  (println output-prompt)
+                                  (user-print val)
+                                  (internal-loop next-alternative))
+                                           ;; ambeval failure
+                                (fn []
+                                  (println ";;; There are no more values of")
+                                  (user-print input)
+                                  (driver-loop)))))))]
+                 (internal-loop
+                  (fn []
+                    (println ";;;; There is no current problem")
+                    (driver-loop)))))]
        (driver-loop)))))
 
+(comment
+  (ambeval (list :amb 1 2)
+           the-global-environment
+           (fn [val next-alt] (println val next-alt))
+           (fn [] (println "FAIL")))
 
-(ambeval (list :amb 1 2)
-         the-global-environment
-         (fn [val next-alt] (println val next-alt))
-         (fn [] (println "FAIL")))
+  (ambeval 1
+           the-global-environment
+           (fn [val next-alt] (println val next-alt))
+           (fn [] (println "FAIL")))
 
-(ambeval 1
-         the-global-environment
-         (fn [val next-alt] (println val next-alt))
-         (fn [] (println "FAIL")))
+  (ambeval (list :define
+                 (list :require :p)
+                 (list :if (list :not :p) (list :amb)))
+           the-global-environment
+           (fn [val next-alt] (println val next-alt))
+           (fn [] (println "FAIL")))
 
-(driver-loop)
+  (ambeval (list :define
+                 (list :an-element-of :items)
+                 (list :require (list :not (list :null? :items)))
+                 (list :amb (list :car :items)
+                       (list :an-element-of (list :cdr :items))))
+           the-global-environment
+           (fn [val next-alt] (println val next-alt))
+           (fn [] (println "FAIL")))
+
+  (ambeval (list :an-element-of (list :list 1 2 3))
+           the-global-environment
+           (fn [val next-alt] (println val next-alt))
+           (fn [] (println "FAIL")))
+;
+  )
+
+
+
+
+;; the-global-environment
+
+
+
+
+;; (driver-loop)
 
 (comment
-  (list (amb 1 2 3) (amb 'a 'b))
-
-  (list 1 2 3)
-
-  (define (require p) (if (not p) (amb) (list)))
+  (def input
+    "(define (require p) (if (not p) (amb)))
 
   (define (an-element-of items)
     (require (not (null? items)))
     (amb (car items) (an-element-of (cdr items))))
 
-  (define l (list 1 2 3))
+  (define (add-to-5 a b)
+    (require (eq? 5 (+ a b)))
+    (list a b))
 
-  (an-element-of l)
+  (define (same-pair list1 list2)
+    (add-to-5
+     (an-element-of list1)
+     (an-element-of list2)))
+
+  (define l1 (list 1 2 3))
+     
+  (define l2 (list 4 2 3))
+
+  (same-pair l1 l2)")
+
+  (def read-next (read-from-string input))
+
+  (def read-next (read-from-string ""))
+
+  (read-next)
+
+  (driver-loop-string input)
+
+  (driver-loop-string)
+
+
+  (str/split input #"\n\n")
+
 
   (define (same-pair list1 list2)
     (let ((a (an-element-of list1))
           (b (an-element-of list2)))
-      (require (prime? (+ a b)))
+      (require (eq? 5 (+ a b)))
       (list a b)))
 
 
