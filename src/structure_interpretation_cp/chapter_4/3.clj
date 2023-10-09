@@ -5,10 +5,10 @@
                      assignment-variable assignment? compound-procedure?
                      create-mapping define-variable! definition-value definition-variable definition?
                      extend-environment if-alternative if-consequent if-predicate if? lambda-body
-                     lambda-parameters lambda? lookup-variable-value make-procedure operands operator
-                     primitive-procedure? procedure-body procedure-env procedure-parameters quoted?
-                     read-lines-till-empty self-evaluating? set-variable-value! tagged-list?
-                     text-of-quotation the-global-environment user-print variable?]]
+                     lambda-parameters lambda? let->lambda-application let? lookup-variable-value
+                     make-procedure operands operator primitive-procedure? procedure-body procedure-env
+                     procedure-parameters quoted? read-lines-till-empty self-evaluating? set-variable-value!
+                     tagged-list? text-of-quotation the-global-environment user-print variable?]]
             [structure-interpretation-cp.chapter-4.parse :as parse]))
 
 ;; 4.3 Variations on a Scheme — Nondeterministic Computing
@@ -37,7 +37,6 @@
 
 (defn- analyze-lambda [exp]
   (let [vars (lambda-parameters exp)
-        ;; differs from book which uses analyze-sequence
         bproc (analyze-sequence (lambda-body exp))]
     (fn [env succeed fail] (succeed (make-procedure vars bproc env) fail))))
 
@@ -67,21 +66,22 @@
 (defn analyze-sequence [exps]
   (letfn [(sequentially [a b]
             (fn [env succeed fail]
-              (a env
+              (a
+               env
                              ;; success continuation for calling a
-                 (fn [a-value fail2]
-                   (b env succeed fail2))
-                 fail)))
-          (loop [first-proc rest-procs]
+               (fn [a-value fail2]
+                 (b env succeed fail2))
+               fail)))
+          (loop-procs [first-proc rest-procs]
             (if (empty? rest-procs)
               first-proc
-              (loop (sequentially first-proc
-                                  (first rest-procs))
-                (rest rest-procs))))]
+              (loop-procs
+               (sequentially first-proc (first rest-procs))
+               (rest rest-procs))))]
     (let [procs (map analyze exps)]
       (if (empty? procs)
         (throw (RuntimeException. (str "Empty sequence: ANALYZE")))
-        (loop (first procs) (rest procs))))))
+        (loop-procs (first procs) (rest procs))))))
 
 ;; Definitions and assignments
 
@@ -200,7 +200,7 @@
          fail)
         :else
         (throw (RuntimeException.
-                (str "Unknown procedure type: EXECUTE-APPLICATRION " proc)))))
+                (str "Unknown procedure type: EXECUTE-APPLICATION " proc)))))
 
 ;; Evaluating amb expressions
 ;; The amb special form is the key element in the nondeterministic language. 
@@ -226,7 +226,10 @@
                      (try-next (rest choices))))))]
         (try-next cprocs)))))
 
+;; exp -> (env succeed fail) -> val
+;; exp -> (env (val fail -> ???) ([] -> ??)) -> val
 (defn analyze [exp]
+  (println "EXP" exp)
   (cond (self-evaluating? exp) (analyze-self-evaluating exp)
         (quoted? exp) (analyze-quoted exp)
         ;; added for section 4.3
@@ -237,6 +240,7 @@
         (definition? exp) (analyze-definition exp)
         (if? exp) (analyze-if exp)
         (lambda? exp) (analyze-lambda exp)
+        (let? exp) (analyze (let->lambda-application exp))
         (application? exp) (analyze-application exp)
         :else (throw (RuntimeException. (str "Unknown expression type: ANALYZE" exp)))))
 
@@ -269,24 +273,28 @@
                          (let [next-string (read-next!)
                                _ (println "> " next-string)
                                input (parse/parse next-string)]
-                           (println input)
+                        ;;    (println input)
                            (if (= input :try-again)
                              (try-again)
                              (do
                                (println ";;;; Starting a new problem")
-                               (ambeval
-                                input
-                                the-global-environment
+                               (try
+                                 (ambeval
+                                  input
+                                  the-global-environment
                                            ;; ambeval success
-                                (fn [val next-alternative]
-                                  (println output-prompt)
-                                  (user-print val)
-                                  (internal-loop next-alternative))
+                                  (fn [val next-alternative]
+                                    (println output-prompt)
+                                    (user-print val)
+                                    (internal-loop next-alternative))
                                            ;; ambeval failure
-                                (fn []
-                                  (println ";;; There are no more values of")
-                                  (user-print input)
-                                  (driver-loop)))))))]
+                                  (fn []
+                                    (println ";;; There are no more values of")
+                                    (user-print input)
+                                    (driver-loop)))
+                                 (catch Exception e
+                                   (println "ambeval " (.getMessage e))
+                                   (driver-loop)))))))]
                  (internal-loop
                   (fn []
                     (println ";;;; There is no current problem")
@@ -360,6 +368,25 @@
 
   (same-pair l1 l2)")
 
+  (def input2
+    "(define (require p) (if (not p) (amb)))
+
+    (define (an-element-of items)
+      (require (not (null? items)))
+      (amb (car items) (an-element-of (cdr items))))
+
+   (define (same-pair list1 list2)
+    (let ((a (an-element-of list1))
+          (b (an-element-of list2)))
+      (require (eq? 5 (+ a b)))
+      (list a b)))
+
+     (define l1 (list 1 2 3))
+
+     (define l2 (list 4 2 3))
+
+     (same-pair l1 l2)")
+
   (def read-next (read-from-string input))
 
   (def read-next (read-from-string ""))
@@ -367,19 +394,62 @@
   (read-next)
 
   (driver-loop-string input)
+  (driver-loop-string input2)
 
   (driver-loop-string)
 
 
   (str/split input #"\n\n")
 
+  (def input3 "  (define (member item items)
+    (if (null? items) false
+        (if (eq? item (car items)) true
+            (member item (cdr items)))))
 
-  (define (same-pair list1 list2)
-    (let ((a (an-element-of list1))
-          (b (an-element-of list2)))
-      (require (eq? 5 (+ a b)))
-      (list a b)))
+  (define (distinct? items)
+    (if (null? items) true
+        (if (null? (cdr items)) true
+            (if (member (car items) (cdr items)) false
+                (distinct? (cdr items))))))
 
+  (define (require p) (if (not p) (amb)))
+
+  (define (multiple-dwelling)
+    (let ((baker (amb 1 2 3 4 5)) 
+             (cooper (amb 1 2 3 4 5))
+             (fletcher (amb 1 2 3 4 5)) 
+             (miller (amb 1 2 3 4 5))
+             (smith (amb 1 2 3 4 5)))
+      (require
+       (distinct? (list baker cooper fletcher miller smith)))
+      (require (not (= baker 5)))
+      (require (not (= cooper 1)))
+        (require (not (= fletcher 5)))
+        (require (not (= fletcher 1)))
+        (require (> miller cooper))
+        (require (not (= (abs (- smith fletcher)) 1)))
+        (require (not (= (abs (- fletcher cooper)) 1)))
+        (list (list 'baker baker) (list 'cooper cooper)
+              (list 'fletcher fletcher) (list 'miller miller)
+              (list 'smith smith))))
+
+")
+
+  (def i4 "
+(define (require p) (if (not p) (amb)))
+
+(define (multiple-dwelling2)
+    (let ((baker (amb 1 2 3 4 5))
+          (cooper (amb 1 2 3 4 5))
+          )
+      (require (not (eq? cooper 1)))
+      (list (list 'baker baker) (list 'cooper cooper)
+              )))
+
+(multiple-dwelling2)")
+
+
+  (driver-loop-string i4)
 
   try-again
 
@@ -393,3 +463,4 @@
 
   ;
   )
+

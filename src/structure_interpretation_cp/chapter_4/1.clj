@@ -122,7 +122,10 @@
     (is (= :var1 (definition-variable (list :define (list :var1 :p1 :p2) :body)))))
   (testing "definition-value"
     (is (= 1 (definition-value '(:define :var1 1))))
-    (is (= (list :lambda (list :p1 :p2) (list :body)) (definition-value (list :define (list :var1 :p1 :p2) :body))))))
+    (is (= (list :lambda (list :p1 :p2) (list :body))
+           (definition-value (list :define (list :var1 :p1 :p2) :body))))
+    (is (= (list :lambda (list :p1 :p2) (list :body1 :body2))
+           (definition-value (list :define (list :var1 :p1 :p2) :body1 :body2))))))
 
 ;; • Conditionals begin with if and have a predicate, a consequent,
 ;; and an (optional) alternative. If the expression has no alternative
@@ -162,6 +165,18 @@
 
 (defn let? [exp] (tagged-list? exp :let))
 
+(defn let-vars [exp]
+  (map first (second exp)))
+
+(defn let-exps [exp]
+  (map second (second exp)))
+
+(defn let-body [exp]
+  (rest (rest exp)))
+
+(defn let->lambda-application [exp]
+  (cons (make-lambda (let-vars exp) (let-body exp))
+        (let-exps exp)))
 
 
 (defn compound-procedure? [p]
@@ -181,6 +196,7 @@
 (def apply-in-underlying-language clojure.core/apply)
 
 (defn apply-primitive-procedure [proc args]
+  (println "PRIM" proc args)
   (try (apply-in-underlying-language
         (primitive-implementation proc) args)
        (catch Exception e
@@ -339,6 +355,7 @@ lov
     (lambda? exp) (make-procedure (lambda-parameters exp)
                                   (lambda-body exp)
                                   env)
+    (let? exp) (evaluate (let->lambda-application exp) env)
     (application? exp) (apply-2 (evaluate (operator exp) env)
                                 (list-of-values (operands exp) env))
     :else (throw (Exception. (str "Unknown expression type: " exp env)))))
@@ -470,6 +487,12 @@ lov
 
   (evaluate (definition-value an-exp) the-global-environment)
   (evaluate an-exp the-global-environment)
+
+  (define (add x y)
+    (let ((a x)
+          (b y))
+      (+ a b)))
+
 
   1)
 

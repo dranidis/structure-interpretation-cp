@@ -2,8 +2,8 @@
   (:require [clojure.test :refer [deftest is run-tests testing]]
             [structure-interpretation-cp.chapter-4.1 :refer [define-variable!
                                                              evaluate
-                                                             extend-environment lambda-body lambda-parameters lambda? set-variable-value!
-                                                             setup-environment the-empty-environment]]))
+                                                             extend-environment lambda-body lambda-parameters lambda? let->lambda-application let-body let-exps
+                                                             let-vars let? set-variable-value! setup-environment the-empty-environment]]))
 
 (deftest lambda-test
   (testing "lambda?"
@@ -14,6 +14,39 @@
     (is (= (list :body) (lambda-body (list :lambda (list :p1 :p2) (list :body)))))
     (is (= (list :body1 :body2) (lambda-body (list :lambda (list :p1 :p2) (list :body1 :body2)))))))
 
+(deftest let-test
+  (let [one-let (list :let (list
+                            (list :var1 :exp1))
+                      :body)
+        two-let (list :let
+                      (list
+                       (list :var1 :exp1)
+                       (list :var2 :exp2))
+                      :body1
+                      :body2)]
+    (testing "let?"
+      (is (let? (list :let (list :var1 :exp1)))))
+    (testing "let-vars"
+      (is (= (list :var1) (let-vars one-let)))
+      (is (= (list :var1 :var2) (let-vars two-let))))
+    (testing "let-exps"
+      (is (= (list :exp1) (let-exps one-let)))
+      (is (= (list :exp1 :exp2) (let-exps two-let))))
+    (testing "let-body"
+      (is (= (list :body) (let-body one-let)))
+      (is (= (list :body1 :body2) (let-body two-let))))
+    (testing "let->lambda-1"
+      (is (= (list (list :lambda
+                         (list :var1)
+                         (list :body))
+                   :exp1)
+             (let->lambda-application one-let))))
+    (testing "let->lambda-2"
+      (is (= (list (list :lambda
+                         (list :var1 :var2)
+                         (list :body1 :body2))
+                   :exp1 :exp2)
+             (let->lambda-application two-let))))))
 
 ;; test for evaluate
 (deftest evaluate-test
